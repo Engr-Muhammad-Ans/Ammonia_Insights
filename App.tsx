@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { EquipmentType, CalculationInput, CalculatorId, CarbonNoInput, HydrogenNoInput, SteamToCarbonInput, FrontEndLoadInput, GasToAirInput, HydrogenToAirInput, ProductionLossInputs, BackendLoadInput } from './types';
+import { EquipmentType, CalculationInput, CalculatorId, CarbonNoInput, HydrogenNoInput, LhvInput, SteamToCarbonInput, FrontEndLoadInput, GasToAirInput, HydrogenToAirInput, ProductionLossInputs, BackendLoadInput } from './types';
 import { calculateApproach } from './services/calculator';
 import { 
   FlaskConical, 
@@ -24,7 +24,8 @@ import {
   AlertCircle,
   Factory,
   Info,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
 
 const AboutModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
@@ -109,6 +110,15 @@ const App: React.FC = () => {
     nh3: '0.01'
   });
 
+  // LHV State
+  const [lhvInputs, setLhvInputs] = useState<LhvInput>({
+    ch4: '94.5',
+    c2h6: '3.2',
+    h2: '1.0',
+    co: '0.1',
+    nh3: '0.01'
+  });
+
   // Steam to Carbon State
   const [scInputs, setScInputs] = useState<SteamToCarbonInput>({
     steamFlow: '150',
@@ -179,6 +189,15 @@ const App: React.FC = () => {
     const nh3 = parseFloat(hydrogenInputs.nh3) || 0;
     return (2 * (ch4 / 100)) + (3 * (c2h6 / 100)) + (1 * (h2 / 100)) + (1.5 * (nh3 / 100));
   }, [hydrogenInputs]);
+
+  const lhvResult = useMemo(() => {
+    const ch4 = parseFloat(lhvInputs.ch4) || 0;
+    const c2h6 = parseFloat(lhvInputs.c2h6) || 0;
+    const h2 = parseFloat(lhvInputs.h2) || 0;
+    const co = parseFloat(lhvInputs.co) || 0;
+    const nh3 = parseFloat(lhvInputs.nh3) || 0;
+    return (ch4 * 85.5538) + (c2h6 * 152.26) + (h2 * 25.786) + (co * 30.19) + (nh3 * 33.79);
+  }, [lhvInputs]);
 
   const scRatioResult = useMemo(() => {
     const steam = parseFloat(scInputs.steamFlow) || 0;
@@ -278,6 +297,13 @@ const App: React.FC = () => {
     setHydrogenInputs(prev => ({ ...prev, [name]: sanitizedValue }));
   };
 
+  const handleLhvInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    let sanitizedValue = value;
+    if (value.length > 1 && value.startsWith('0') && value[1] !== '.') sanitizedValue = value.substring(1);
+    setLhvInputs(prev => ({ ...prev, [name]: sanitizedValue }));
+  };
+
   const handleScInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     let sanitizedValue = value;
@@ -327,6 +353,7 @@ const App: React.FC = () => {
     { id: CalculatorId.FRONT_END_LOAD, name: 'Front end load', icon: <Zap className="w-6 h-6" />, color: 'orange', disabled: false },
     { id: CalculatorId.BACK_END_LOAD, name: 'Backend Load', icon: <ArrowDownCircle className="w-6 h-6" />, color: 'purple', disabled: false },
     { id: CalculatorId.HYDROGEN_NO, name: 'Hydrogen No.', icon: <Flame className="w-6 h-6" />, color: 'emerald', disabled: false },
+    { id: CalculatorId.LHV, name: 'Low Heating Value (LHV)', icon: <Flame className="w-6 h-6" />, color: 'red', disabled: false },
     { id: CalculatorId.STEAM_TO_CARBON, name: 'Steam to Carbon ratio', icon: <Droplets className="w-6 h-6" />, color: 'cyan', disabled: false },
     { id: CalculatorId.GAS_TO_AIR, name: 'Gas to Air ratio', icon: <Wind className="w-6 h-6" />, color: 'slate', disabled: false },
     { id: CalculatorId.HYDROGEN_TO_AIR, name: 'Hydrogen to Air Ratio', icon: <Flame className="w-6 h-6" />, color: 'red', disabled: false },
@@ -437,7 +464,7 @@ const App: React.FC = () => {
                     {item.icon}
                   </div>
                   <div>
-                    <h3 className="font-black text-slate-800 tracking-tight">{item.name}</h3>
+                    <h3 className="font-black text-slate-800 tracking-tight leading-tight">{item.name}</h3>
                     <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
                       {item.disabled ? 'Coming Soon' : 'Open Calculator'}
                     </p>
@@ -464,6 +491,9 @@ const App: React.FC = () => {
                 <InputGroup label="CO₂ %" name="co2" value={carbonInputs.co2} onChange={handleCarbonInputChange} />
                 <InputGroup label="CO %" name="co" value={carbonInputs.co} onChange={handleCarbonInputChange} />
               </div>
+              <CompositionTotal 
+                values={[carbonInputs.ch4, carbonInputs.c2h6, carbonInputs.co2, carbonInputs.co]} 
+              />
             </section>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <ResultCard 
@@ -474,7 +504,42 @@ const App: React.FC = () => {
                 color="blue"
               />
             </div>
-            <NoteSection content={<p>The Carbon Number represents the average number of carbon atoms per molecule in the process stream, used for precise stoichiometric control in reforming sections.</p>} />
+          </div>
+        ) : activeView === CalculatorId.LHV ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-50">
+                <Flame className="w-5 h-5 text-red-600" />
+                <h3 className="text-lg font-bold text-slate-800">LHV Input Sheet (mole %)</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 items-end">
+                <InputGroup label="CH₄ %" name="ch4" value={lhvInputs.ch4} onChange={handleLhvInputChange} />
+                <InputGroup label="C₂H₆ %" name="c2h6" value={lhvInputs.c2h6} onChange={handleLhvInputChange} />
+                <InputGroup label="H₂ %" name="h2" value={lhvInputs.h2} onChange={handleLhvInputChange} />
+                <InputGroup label="CO %" name="co" value={lhvInputs.co} onChange={handleLhvInputChange} />
+                <InputGroup label="NH₃ %" name="nh3" value={lhvInputs.nh3} onChange={handleLhvInputChange} />
+              </div>
+              <CompositionTotal 
+                values={[lhvInputs.ch4, lhvInputs.c2h6, lhvInputs.h2, lhvInputs.co, lhvInputs.nh3]} 
+              />
+            </section>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ResultCard 
+                label="Low Heating Value (LHV)" 
+                value={`${lhvResult.toFixed(2)}`} 
+                subValue="Kcal/NMC"
+                icon={<Flame className="w-5 h-5 text-red-500" />}
+                color="orange"
+              />
+            </div>
+            <NoteSection content={
+              <div className="text-sm text-slate-600 leading-relaxed">
+                <p>LHV is the amount of heat released by combusting a specified quantity and returning the temperature of the combustion products to 150°C, which prevents the latent heat of vaporization of water in the reaction products from being recovered.</p>
+                <div className="mt-4 p-4 bg-slate-50 rounded-xl font-mono text-xs">
+                  Formula: LHV = (CH₄ * 85.5538) + (C₂H₆ * 152.26) + (H₂ * 25.786) + (CO * 30.19) + (NH₃ * 33.79)
+                </div>
+              </div>
+            } />
           </div>
         ) : activeView === CalculatorId.FRONT_END_LOAD ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -496,6 +561,10 @@ const App: React.FC = () => {
                     <InputGroup label="Design CO₂ %" name="designCO2" value={feInputs.designCO2} onChange={handleFeInputChange} />
                     <InputGroup label="Design CO %" name="designCO" value={feInputs.designCO} onChange={handleFeInputChange} />
                   </div>
+                  <CompositionTotal 
+                    values={[feInputs.designCH4, feInputs.designC2H6, feInputs.designCO2, feInputs.designCO]} 
+                    label="Design Composition Total"
+                  />
                 </div>
 
                 <div>
@@ -507,9 +576,12 @@ const App: React.FC = () => {
                     <InputGroup label="Current CH₄ %" name="currentCH4" value={feInputs.currentCH4} onChange={handleFeInputChange} />
                     <InputGroup label="Current C₂H₆ %" name="currentC2H6" value={feInputs.currentC2H6} onChange={handleFeInputChange} />
                     <InputGroup label="Current CO₂ %" name="currentCO2" value={feInputs.currentCO2} onChange={handleFeInputChange} />
-                    {/* Fixed currentCO by referencing feInputs.currentCO */}
                     <InputGroup label="Current CO %" name="currentCO" value={feInputs.currentCO} onChange={handleFeInputChange} />
                   </div>
+                  <CompositionTotal 
+                    values={[feInputs.currentCH4, feInputs.currentC2H6, feInputs.currentCO2, feInputs.currentCO]} 
+                    label="Current Composition Total"
+                  />
                 </div>
               </div>
             </section>
@@ -523,7 +595,6 @@ const App: React.FC = () => {
                 color="orange"
               />
             </div>
-            <NoteSection content={<p>Front End Load compares the current carbon-weighted flow through the reforming section against the plant's design capacity. This helps in understanding the current operating throughput relative to design limits.</p>} />
           </div>
         ) : activeView === CalculatorId.BACK_END_LOAD ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -546,7 +617,6 @@ const App: React.FC = () => {
                 color="purple"
               />
             </div>
-            <NoteSection content={<p>Backend Load calculates the current plant production utilization rate relative to the design nameplate capacity. This is a key metric for overall plant efficiency and asset utilization.</p>} />
           </div>
         ) : activeView === CalculatorId.HYDROGEN_NO ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -561,6 +631,9 @@ const App: React.FC = () => {
                 <InputGroup label="C₂H₆ %" name="c2h6" value={hydrogenInputs.c2h6} onChange={handleHydrogenInputChange} />
                 <InputGroup label="NH₃ %" name="nh3" value={hydrogenInputs.nh3} onChange={handleHydrogenInputChange} />
               </div>
+              <CompositionTotal 
+                values={[hydrogenInputs.h2, hydrogenInputs.ch4, hydrogenInputs.c2h6, hydrogenInputs.nh3]} 
+              />
             </section>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <ResultCard 
@@ -571,7 +644,6 @@ const App: React.FC = () => {
                 color="emerald"
               />
             </div>
-            <NoteSection content={<p>The Hydrogen Number indicates the equivalent hydrogen potential of the process stream, accounting for free H₂ and hydrocarbon-bound hydrogen molecules.</p>} />
           </div>
         ) : activeView === CalculatorId.STEAM_TO_CARBON ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -583,13 +655,15 @@ const App: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 items-end">
                 <InputGroup label="Steam Flow (Tons/hr)" name="steamFlow" value={scInputs.steamFlow} onChange={handleScInputChange} />
                 <InputGroup label="Process Gas Flow (NMC/hr)" name="processGasFlow" value={scInputs.processGasFlow} onChange={handleScInputChange} />
-                <div className="hidden md:block" /> {/* Spacer */}
-                
+                <div className="hidden md:block" />
                 <InputGroup label="CH₄ %" name="ch4" value={scInputs.ch4} onChange={handleScInputChange} />
                 <InputGroup label="C₂H₆ %" name="c2h6" value={scInputs.c2h6} onChange={handleScInputChange} />
                 <InputGroup label="CO₂ %" name="co2" value={scInputs.co2} onChange={handleScInputChange} />
                 <InputGroup label="CO %" name="co" value={scInputs.co} onChange={handleScInputChange} />
               </div>
+              <CompositionTotal 
+                values={[scInputs.ch4, scInputs.c2h6, scInputs.co2, scInputs.co]} 
+              />
             </section>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <ResultCard 
@@ -600,7 +674,6 @@ const App: React.FC = () => {
                 color="blue"
               />
             </div>
-            <NoteSection content={<p>The Steam to Carbon ratio (S/C) is a critical parameter in primary reforming to prevent carbon formation on the catalyst and ensure efficient methane conversion.</p>} />
           </div>
         ) : activeView === CalculatorId.GAS_TO_AIR ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -623,7 +696,6 @@ const App: React.FC = () => {
                 color="blue"
               />
             </div>
-            <NoteSection content={<p>The Gas to Air ratio determines the stoichiometric balance in the secondary reformer, affecting the final Nitrogen content and reactor temperatures.</p>} />
           </div>
         ) : activeView === CalculatorId.HYDROGEN_TO_AIR ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -641,6 +713,9 @@ const App: React.FC = () => {
                 <InputGroup label="C₂H₆ %" name="c2h6" value={haInputs.c2h6} onChange={handleHaInputChange} />
                 <InputGroup label="NH₃ %" name="nh3" value={haInputs.nh3} onChange={handleHaInputChange} />
               </div>
+              <CompositionTotal 
+                values={[haInputs.h2, haInputs.ch4, haInputs.c2h6, haInputs.nh3]} 
+              />
             </section>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <ResultCard 
@@ -651,7 +726,6 @@ const App: React.FC = () => {
                 color="purple"
               />
             </div>
-            <NoteSection content={<p>The Hydrogen to Air ratio accounts for both free hydrogen and the potential hydrogen from hydrocarbons in the process gas stream, normalized against secondary air flow.</p>} />
           </div>
         ) : activeView === CalculatorId.PRODUCTION_LOSS ? (
           <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -714,16 +788,6 @@ const App: React.FC = () => {
                 <ResultCard label="Urea Loss" value={`${productionLossResults.co2.ureaLoss.toFixed(2)} MTPD`} subValue="Equivalent Urea Loss" icon={<BarChart3 className="w-5 h-5 text-emerald-700" />} color="emerald" />
               </div>
             </div>
-
-            <NoteSection content={
-              <div className="flex gap-4 items-start text-sm text-slate-600">
-                <AlertCircle className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold text-slate-800 mb-1">Impact Analysis</p>
-                  <p>Increased slips in methane, carbon monoxide, or carbon dioxide directly consume hydrogen in the methanator or dilute the synthesis gas, leading to measurable daily production losses in both Ammonia and Urea.</p>
-                </div>
-              </div>
-            } />
           </div>
         ) : activeView === CalculatorId.ATE ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -758,6 +822,9 @@ const App: React.FC = () => {
                 <InputGroup label="Exit Press (kg/cm²g)" name="pressureGauge" value={aetInputs.pressureGauge} onChange={handleAetInputChange} />
                 <InputGroup label="Exit Temp (°C)" name="exitTemperature" value={aetInputs.exitTemperature} onChange={handleAetInputChange} />
               </div>
+              <CompositionTotal 
+                values={[aetInputs.ch4, aetInputs.h2, aetInputs.co, aetInputs.co2, aetInputs.h2o, aetInputs.n2, aetInputs.nh3]} 
+              />
             </section>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -770,25 +837,6 @@ const App: React.FC = () => {
               <ResultCard label="Absolute Pressure" value={`${aetResults.pAbsBar.toFixed(3)} bar`} subValue={`${aetInputs.pressureGauge} kg/cm²g`} icon={<LayoutDashboard className="w-5 h-5 text-purple-500" />} color="purple" />
               <ResultCard label="Exit Temperature" value={`${aetInputs.exitTemperature} °C`} subValue={`${(parseFloat(aetInputs.exitTemperature) + 273.15).toFixed(2)} K`} icon={<Wind className="w-5 h-5 text-blue-500" />} color="blue" />
             </div>
-
-            <NoteSection content={
-              <div className="space-y-4 text-sm text-slate-600 leading-relaxed">
-                <div className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 italic">
-                  A positive approach indicates the system is reaching equilibrium 
-                  at a higher temperature than the measured exit, suggesting more conversion is thermodynamically possible.
-                </div>
-                {selectedEquipment === EquipmentType.METHANATOR && (
-                  <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-100">
-                    <strong>Methanator Analysis:</strong> Both CO and CO₂ methanation reactions are analyzed. 
-                  </div>
-                )}
-                {selectedEquipment === EquipmentType.AMMONIA_REACTOR && (
-                  <div className="p-4 bg-purple-50/50 rounded-xl border border-purple-100">
-                    <strong>Ammonia Reactor:</strong> Includes pressure-dependent correction factors in the equilibrium constant correlation.
-                  </div>
-                )}
-              </div>
-            } />
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-20 bg-white rounded-3xl border border-dashed border-slate-300">
@@ -804,9 +852,32 @@ const App: React.FC = () => {
       <footer className="w-full bg-slate-100 border-t border-slate-200 py-10">
         <div className="max-w-7xl mx-auto px-8 text-center flex flex-col items-center gap-1">
           <p className="text-slate-700 font-bold text-sm">Developed by Muhammad Ans, Process Control Engineer.</p>
-          <p className="text-slate-400 text-[9px] uppercase tracking-[0.2em]">© 2026 Fauji Fertilizer Company. All rights reserved.</p>
+          <p className="text-slate-400 text-[9px] uppercase tracking-[0.2em]">© 2026 | All rights reserved.</p>
         </div>
       </footer>
+    </div>
+  );
+};
+
+const CompositionTotal: React.FC<{ values: string[], label?: string }> = ({ values, label = "Total mole %" }) => {
+  const total = useMemo(() => {
+    return values.reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+  }, [values]);
+
+  const isError = total > 100;
+
+  return (
+    <div className={`mt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl border transition-all duration-300 ${isError ? 'bg-red-50 border-red-200' : 'bg-emerald-50/50 border-emerald-100'}`}>
+      <div className="flex items-center gap-3">
+        {isError ? <AlertTriangle className="w-5 h-5 text-red-500 animate-pulse" /> : <div className="w-2 h-2 rounded-full bg-emerald-400" />}
+        <div>
+          <p className={`text-xs font-black uppercase tracking-widest ${isError ? 'text-red-500' : 'text-emerald-600'}`}>{label}</p>
+          {isError && <p className="text-[10px] text-red-400 font-bold">Error: Total composition cannot exceed 100%</p>}
+        </div>
+      </div>
+      <div className={`text-xl font-black tracking-tight mt-2 sm:mt-0 ${isError ? 'text-red-600' : 'text-slate-800'}`}>
+        {total.toFixed(4)} %
+      </div>
     </div>
   );
 };

@@ -7,7 +7,8 @@ export enum CalculatorId {
   GAS_TO_AIR = 'gas-to-air',
   HYDROGEN_TO_AIR = 'hydrogen-to-air',
   ATE = 'ate',
-  PRODUCTION_LOSS = 'production-loss'
+  PRODUCTION_LOSS = 'production-loss',
+  LHV = 'lhv'
 }
 
 export enum EquipmentType {
@@ -50,6 +51,14 @@ export interface HydrogenNoInput {
   h2: string;
   ch4: string;
   c2h6: string;
+  nh3: string;
+}
+
+export interface LhvInput {
+  ch4: string;
+  c2h6: string;
+  h2: string;
+  co: string;
   nh3: string;
 }
 
