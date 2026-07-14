@@ -1,5 +1,8 @@
 {
   "name": "Ammonia Insights",
   "description": "Comprehensive suite of process calculators for Ammonia Plant monitoring and optimization.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

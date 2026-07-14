@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { EquipmentType, CalculationInput, CalculatorId, CarbonNoInput, HydrogenNoInput, LhvInput, SteamToCarbonInput, FrontEndLoadInput, GasToAirInput, HydrogenToAirInput, ProductionLossInputs, BackendLoadInput } from './types';
+import { EquipmentType, CalculationInput, CalculatorId, CarbonNoInput, HydrogenNoInput, LhvInput, CorrectedFlowInput, SteamToCarbonInput, FrontEndLoadInput, GasToAirInput, HydrogenToAirInput, ProductionLossInputs, BackendLoadInput } from './types';
 import { calculateApproach } from './services/calculator';
 import { 
   FlaskConical, 
@@ -25,7 +25,8 @@ import {
   Factory,
   Info,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Search
 } from 'lucide-react';
 
 const AboutModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isOpen, onClose }) => {
@@ -79,6 +80,10 @@ const App: React.FC = () => {
   const [activeView, setActiveView] = useState<CalculatorId | 'dashboard' | 'landing'>('landing');
   const [isAboutOpen, setIsAboutOpen] = useState(false);
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
+
   // AET State
   const [selectedEquipment, setSelectedEquipment] = useState<EquipmentType>(EquipmentType.PRIMARY_REFORMER);
   const [aetInputs, setAetInputs] = useState<CalculationInput>({
@@ -117,6 +122,26 @@ const App: React.FC = () => {
     h2: '1.0',
     co: '0.1',
     nh3: '0.01'
+  });
+
+  // Corrected Flow State
+  const [cfInputs, setCfInputs] = useState<CorrectedFlowInput>({
+    opTemp: '35',
+    opPressure: '32.9',
+    measuredFlow: '50000',
+    h2: '63.57',
+    ar: '0.80',
+    n2: '6.56',
+    ch4: '7.50',
+    co: '9.09',
+    co2: '12.48',
+    c2h6: '0',
+    h2o: '0',
+    nh3: '0',
+    designTemp: '30',
+    designPressure: '35.0',
+    designMW: '10.5',
+    designZ: '0.99'
   });
 
   // Steam to Carbon State
@@ -276,6 +301,89 @@ const App: React.FC = () => {
     };
   }, [plInputs]);
 
+  const correctedFlowResult = useMemo(() => {
+    const opTempC = parseFloat(cfInputs.opTemp) || 0;
+    const opPressG = parseFloat(cfInputs.opPressure) || 0;
+    const measuredFlow = parseFloat(cfInputs.measuredFlow) || 0;
+
+    const h2 = parseFloat(cfInputs.h2) || 0;
+    const ar = parseFloat(cfInputs.ar) || 0;
+    const n2 = parseFloat(cfInputs.n2) || 0;
+    const ch4 = parseFloat(cfInputs.ch4) || 0;
+    const co = parseFloat(cfInputs.co) || 0;
+    const co2 = parseFloat(cfInputs.co2) || 0;
+    const c2h6 = parseFloat(cfInputs.c2h6) || 0;
+    const h2o = parseFloat(cfInputs.h2o) || 0;
+    const nh3 = parseFloat(cfInputs.nh3) || 0;
+
+    const designTempC = parseFloat(cfInputs.designTemp) || 0;
+    const designPressG = parseFloat(cfInputs.designPressure) || 0;
+    const designMW = parseFloat(cfInputs.designMW) || 0;
+    const designZ = parseFloat(cfInputs.designZ) || 0;
+
+    const opTempK = opTempC + 273.15;
+    const opPressAbs = opPressG + 1.03323;
+    const designTempK = designTempC + 273.15;
+    const designPressAbs = designPressG + 1.03323;
+
+    const fracH2 = h2 / 100;
+    const fracAr = ar / 100;
+    const fracN2 = n2 / 100;
+    const fracCh4 = ch4 / 100;
+    const fracCo = co / 100;
+    const fracCo2 = co2 / 100;
+    const fracC2h6 = c2h6 / 100;
+    const fracH2o = h2o / 100;
+    const fracNh3 = nh3 / 100;
+
+    const mwProcess = (fracH2 * 2) + (fracAr * 39) + (fracN2 * 28) + (fracCh4 * 16) + 
+                      (fracCo * 28) + (fracCo2 * 44) + (fracC2h6 * 30) + (fracH2o * 18) + (fracNh3 * 17);
+
+    const critPsum = (fracH2 * 13.3889236) + (fracAr * 49.9458856) + (fracN2 * 34.6092968) + 
+                     (fracCh4 * 46.9479088) + (fracCo * 35.6800028) + (fracCo2 * 75.2757304) + 
+                     (fracC2h6 * 49.762336) + (fracH2o * 224.899246) + (fracNh3 * 114.59);
+    const critPgasAbs = critPsum + 1.03323;
+
+    const critTgasK = (fracH2 * 33.18) + (fracAr * 150.86) + (fracN2 * 126.1) + 
+                      (fracCh4 * 190.58) + (fracCo * 132.92) + (fracCo2 * 304.19) + 
+                      (fracC2h6 * 305.42) + (fracH2o * 647.13) + (fracNh3 * 405.4);
+
+    const reducedP = critPgasAbs > 0 ? opPressAbs / critPgasAbs : 0;
+    const reducedT = critTgasK > 0 ? opTempK / critTgasK : 0;
+
+    let zProc = 1;
+    if (reducedT > 0) {
+      const term1 = (3.52 * reducedP) / Math.pow(10, 0.9813 * reducedT);
+      const term2 = 0.274 * Math.pow(reducedP, 2) * Math.exp(-1.2 * reducedT);
+      const term3 = 0.027 * Math.pow(reducedP, 3) * Math.exp(-1.6 * reducedT);
+      zProc = 1 - term1 + term2 + term3;
+    }
+
+    const num = opPressAbs * designTempK * designMW * designZ;
+    const den = designPressAbs * opTempK * mwProcess * zProc;
+
+    let correctedFlow = 0;
+    if (den > 0 && num >= 0) {
+      correctedFlow = measuredFlow * Math.sqrt(num / den);
+    }
+
+    let changeInFlow = 0;
+    if (correctedFlow > 0) {
+      changeInFlow = ((correctedFlow - measuredFlow) / correctedFlow) * 100;
+    }
+
+    return {
+      mwProcess,
+      critPgasAbs,
+      critTgasK,
+      reducedP,
+      reducedT,
+      zProc,
+      correctedFlow,
+      changeInFlow
+    };
+  }, [cfInputs]);
+
   const handleAetInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     let sanitizedValue = value;
@@ -302,6 +410,13 @@ const App: React.FC = () => {
     let sanitizedValue = value;
     if (value.length > 1 && value.startsWith('0') && value[1] !== '.') sanitizedValue = value.substring(1);
     setLhvInputs(prev => ({ ...prev, [name]: sanitizedValue }));
+  };
+
+  const handleCfInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    let sanitizedValue = value;
+    if (value.length > 1 && value.startsWith('0') && value[1] !== '.') sanitizedValue = value.substring(1);
+    setCfInputs(prev => ({ ...prev, [name]: sanitizedValue }));
   };
 
   const handleScInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -349,17 +464,126 @@ const App: React.FC = () => {
   };
 
   const dashboardItems = [
-    { id: CalculatorId.CARBON_NO, name: 'Carbon No.', icon: <Activity className="w-6 h-6" />, color: 'blue', disabled: false },
-    { id: CalculatorId.FRONT_END_LOAD, name: 'Front end load', icon: <Zap className="w-6 h-6" />, color: 'orange', disabled: false },
-    { id: CalculatorId.BACK_END_LOAD, name: 'Backend Load', icon: <ArrowDownCircle className="w-6 h-6" />, color: 'purple', disabled: false },
-    { id: CalculatorId.HYDROGEN_NO, name: 'Hydrogen No.', icon: <Flame className="w-6 h-6" />, color: 'emerald', disabled: false },
-    { id: CalculatorId.LHV, name: 'Low Heating Value (LHV)', icon: <Flame className="w-6 h-6" />, color: 'red', disabled: false },
-    { id: CalculatorId.STEAM_TO_CARBON, name: 'Steam to Carbon ratio', icon: <Droplets className="w-6 h-6" />, color: 'cyan', disabled: false },
-    { id: CalculatorId.GAS_TO_AIR, name: 'Gas to Air ratio', icon: <Wind className="w-6 h-6" />, color: 'slate', disabled: false },
-    { id: CalculatorId.HYDROGEN_TO_AIR, name: 'Hydrogen to Air Ratio', icon: <Flame className="w-6 h-6" />, color: 'red', disabled: false },
-    { id: CalculatorId.ATE, name: 'ATE (Equilibrium)', icon: <FlaskConical className="w-6 h-6" />, color: 'indigo', disabled: false },
-    { id: CalculatorId.PRODUCTION_LOSS, name: 'Production Loss', icon: <BarChart3 className="w-6 h-6" />, color: 'rose', disabled: false },
+    { 
+      id: CalculatorId.CARBON_NO, 
+      name: 'Carbon No.', 
+      icon: <Activity className="w-6 h-6" />, 
+      color: 'blue', 
+      disabled: false,
+      description: 'Catalyst carbon formation prevention & steam reforming parameter.',
+      tags: ['steam', 'reforming', 'catalyst', 'carbon formation', 'hydrocarbon', 'ratio']
+    },
+    { 
+      id: CalculatorId.FRONT_END_LOAD, 
+      name: 'Front end load', 
+      icon: <Zap className="w-6 h-6" />, 
+      color: 'orange', 
+      disabled: false,
+      description: 'Feed gas processing, reformer capacity, and front-end throughput.',
+      tags: ['feed', 'throughput', 'reformer', 'capacity', 'load']
+    },
+    { 
+      id: CalculatorId.BACK_END_LOAD, 
+      name: 'Backend Load', 
+      icon: <ArrowDownCircle className="w-6 h-6" />, 
+      color: 'purple', 
+      disabled: false,
+      description: 'CO shift, methanation, and synthesis loop feed gas volume tracking.',
+      tags: ['shift', 'methanation', 'synthesis', 'volume', 'load']
+    },
+    { 
+      id: CalculatorId.HYDROGEN_NO, 
+      name: 'Hydrogen No.', 
+      icon: <Flame className="w-6 h-6" />, 
+      color: 'emerald', 
+      disabled: false,
+      description: 'Hydrogen-to-nitrogen ratios, fuel gas composition, and balance.',
+      tags: ['hydrogen', 'nitrogen', 'ratio', 'fuel', 'composition']
+    },
+    { 
+      id: CalculatorId.LHV, 
+      name: 'Low Heating Value (LHV)', 
+      icon: <Flame className="w-6 h-6" />, 
+      color: 'red', 
+      disabled: false,
+      description: 'Fuel gas net heat duty, heating value calculation from composition.',
+      tags: ['fuel', 'heating value', 'efficiency', 'heat duty', 'calorific']
+    },
+    { 
+      id: CalculatorId.STEAM_TO_CARBON, 
+      name: 'Steam to Carbon ratio', 
+      icon: <Droplets className="w-6 h-6" />, 
+      color: 'cyan', 
+      disabled: false,
+      description: 'Primary reformer inlet steam-to-carbon molar ratio tracking.',
+      tags: ['steam', 'molar ratio', 'carbon', 'inlet', 's/c']
+    },
+    { 
+      id: CalculatorId.GAS_TO_AIR, 
+      name: 'Gas to Air ratio', 
+      icon: <Wind className="w-6 h-6" />, 
+      color: 'slate', 
+      disabled: false,
+      description: 'Combustion ratio, burner fuel-air mixture, and excess air control.',
+      tags: ['combustion', 'burner', 'mixture', 'air', 'fuel', 'ratio']
+    },
+    { 
+      id: CalculatorId.HYDROGEN_TO_AIR, 
+      name: 'Hydrogen to Air Ratio', 
+      icon: <Flame className="w-6 h-6" />, 
+      color: 'red', 
+      disabled: false,
+      description: 'Auto-thermal/secondary reformer flame ratio & combustion safety.',
+      tags: ['secondary reformer', 'flame', 'safety', 'combustion', 'ratio']
+    },
+    { 
+      id: CalculatorId.ATE, 
+      name: 'ATE (Equilibrium)', 
+      icon: <FlaskConical className="w-6 h-6" />, 
+      color: 'indigo', 
+      disabled: false,
+      description: 'Approach to equilibrium calculations for shift and reforming reactions.',
+      tags: ['equilibrium', 'approach', 'reforming', 'conversion', 'reaction', 'temperature']
+    },
+    { 
+      id: CalculatorId.PRODUCTION_LOSS, 
+      name: 'Production Loss', 
+      icon: <BarChart3 className="w-6 h-6" />, 
+      color: 'rose', 
+      disabled: false,
+      description: 'Calculate synthetic production loss due to venting or purging.',
+      tags: ['purge', 'venting', 'loss', 'synthesis', 'ammonia', 'nitrogen']
+    },
+    { 
+      id: CalculatorId.CORRECTED_FLOW, 
+      name: 'Corrected Flow', 
+      icon: <Scaling className="w-6 h-6" />, 
+      color: 'indigo', 
+      disabled: false,
+      description: 'Orifice gas flow rate correction for temperature and pressure density shift.',
+      tags: ['orifice', 'flow correction', 'density', 'compensation', 'pressure', 'temperature']
+    },
+    { 
+      id: 'reformer-kinetic-model', 
+      name: 'Reformer Kinetic Model', 
+      icon: <Factory className="w-6 h-6" />, 
+      color: 'blue', 
+      disabled: false, 
+      url: 'https://reformer-kinetic-model.vercel.app/',
+      description: 'Primary reformer reaction kinetics, tube profiles, and heat transfer modeling.',
+      tags: ['kinetics', 'profile', 'heat transfer', 'simulation', 'model', 'kinetic']
+    },
   ];
+
+  const filteredDashboardItems = useMemo(() => {
+    if (!searchQuery.trim()) return dashboardItems;
+    const query = searchQuery.toLowerCase().trim();
+    return dashboardItems.filter(item => 
+      item.name.toLowerCase().includes(query) ||
+      item.description.toLowerCase().includes(query) ||
+      item.tags.some(tag => tag.toLowerCase().includes(query))
+    );
+  }, [searchQuery, dashboardItems]);
 
   if (activeView === 'landing') {
     return (
@@ -451,32 +675,156 @@ const App: React.FC = () => {
 
         {/* Views */}
         {activeView === 'dashboard' ? (
-          <div className="space-y-12">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {dashboardItems.map(item => (
-                <button
-                  key={item.id}
-                  disabled={item.disabled}
-                  onClick={() => setActiveView(item.id)}
-                  className={`group p-6 rounded-2xl border bg-white shadow-sm hover:shadow-md transition-all text-left flex flex-col gap-4 relative overflow-hidden ${item.disabled ? 'opacity-60 cursor-not-allowed' : 'hover:border-blue-300'}`}
-                >
-                  <div className={`p-3 rounded-xl w-fit ${item.disabled ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors'}`}>
-                    {item.icon}
-                  </div>
-                  <div>
-                    <h3 className="font-black text-slate-800 tracking-tight leading-tight">{item.name}</h3>
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
-                      {item.disabled ? 'Coming Soon' : 'Open Calculator'}
-                    </p>
-                  </div>
-                  {!item.disabled && (
-                    <div className="absolute -right-4 -bottom-4 opacity-[0.03] scale-150 group-hover:scale-[1.8] group-hover:rotate-12 transition-all duration-700">
-                      {item.icon}
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Elegant Search & Auto-suggest Panel */}
+            <div className="relative w-full max-w-2xl mx-auto mb-6 z-30">
+              <div className="relative flex items-center bg-white border border-slate-200 rounded-2xl shadow-sm focus-within:shadow-md focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all">
+                <div className="pl-4 text-slate-400">
+                  <Search className="w-5 h-5" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search calculators (e.g., steam, carbon, kinetic, shift...)"
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setIsSuggestionsOpen(true);
+                  }}
+                  onFocus={() => setIsSuggestionsOpen(true)}
+                  className="w-full py-4 pl-3 pr-12 text-sm font-bold text-slate-700 bg-transparent border-0 outline-none placeholder-slate-400"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery('');
+                      setIsSuggestionsOpen(false);
+                    }}
+                    className="absolute right-3 p-1.5 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 transition-all"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Suggestions Dropdown */}
+              {isSuggestionsOpen && searchQuery.trim().length > 0 && (
+                <>
+                  {/* Overlay to close suggestions when clicking outside */}
+                  <div 
+                    className="fixed inset-0 z-40 cursor-default" 
+                    onClick={() => setIsSuggestionsOpen(false)} 
+                  />
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="p-2 border-b border-slate-50 bg-slate-50/50 flex justify-between items-center px-4">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Calculator Suggestions</span>
+                      <span className="text-[10px] text-slate-400 font-bold">Matches found: {filteredDashboardItems.length}</span>
                     </div>
-                  )}
-                </button>
-              ))}
+                    
+                    {filteredDashboardItems.length > 0 ? (
+                      <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                        {filteredDashboardItems.map(item => {
+                          const isLink = 'url' in item;
+                          return (
+                            <button
+                              key={`suggest-${item.id}`}
+                              onClick={() => {
+                                if (isLink) {
+                                  window.open((item as any).url, '_blank', 'noopener,noreferrer');
+                                } else {
+                                  setActiveView(item.id as any);
+                                }
+                                setSearchQuery('');
+                                setIsSuggestionsOpen(false);
+                              }}
+                              className="w-full p-4 hover:bg-slate-50 text-left flex items-start gap-4 transition-all group"
+                            >
+                              <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all shrink-0">
+                                {React.cloneElement(item.icon as React.ReactElement, { className: 'w-5 h-5' })}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="font-bold text-slate-800 text-sm leading-tight group-hover:text-blue-600 transition-colors">
+                                  {item.name}
+                                </h4>
+                                <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">
+                                  {item.description}
+                                </p>
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {item.tags.map(tag => {
+                                    const isMatch = tag.toLowerCase().includes(searchQuery.toLowerCase().trim());
+                                    return (
+                                      <span 
+                                        key={tag} 
+                                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${isMatch ? 'bg-blue-100 text-blue-700 font-black' : 'bg-slate-100 text-slate-400'}`}
+                                      >
+                                        #{tag}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-slate-400">
+                        <Activity className="w-8 h-8 mx-auto mb-2 opacity-50 stroke-[1.5]" />
+                        <p className="text-sm font-bold">No matching calculators found.</p>
+                        <p className="text-xs mt-0.5">Try searching for other words like "reformer", "shift", or "steam".</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
+
+            {/* Grid of filtered items */}
+            {filteredDashboardItems.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {filteredDashboardItems.map(item => {
+                  const isLink = 'url' in item;
+                  const Component = isLink ? 'a' : 'button';
+                  const linkProps = isLink ? { href: (item as any).url, target: '_blank', rel: 'noopener noreferrer' } : {};
+                  const buttonProps = !isLink ? { onClick: () => setActiveView(item.id as any), disabled: item.disabled } : {};
+
+                  return (
+                    <Component
+                      key={item.id}
+                      {...linkProps}
+                      {...buttonProps}
+                      className={`group p-6 rounded-2xl border bg-white shadow-sm hover:shadow-md transition-all text-left flex flex-col gap-4 relative overflow-hidden ${!isLink && item.disabled ? 'opacity-60 cursor-not-allowed' : 'hover:border-blue-300 cursor-pointer'}`}
+                    >
+                      <div className={`p-3 rounded-xl w-fit ${!isLink && item.disabled ? 'bg-slate-100 text-slate-400' : 'bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors'}`}>
+                        {item.icon}
+                      </div>
+                      <div>
+                        <h3 className="font-black text-slate-800 tracking-tight leading-tight">{item.name}</h3>
+                        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
+                          {isLink ? 'Open Model' : item.disabled ? 'Coming Soon' : 'Open Calculator'}
+                        </p>
+                      </div>
+                      {(!item.disabled || isLink) && (
+                        <div className="absolute -right-4 -bottom-4 opacity-[0.03] scale-150 group-hover:scale-[1.8] group-hover:rotate-12 transition-all duration-700">
+                          {item.icon}
+                        </div>
+                      )}
+                    </Component>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-16 bg-white rounded-2xl border border-slate-200 text-center text-slate-500 max-w-md mx-auto shadow-sm">
+                <Search className="w-12 h-12 text-slate-300 mx-auto mb-4 stroke-[1.5]" />
+                <h3 className="font-black text-slate-800 text-lg leading-tight">No calculators match "{searchQuery}"</h3>
+                <p className="text-slate-400 text-sm mt-1 font-medium">Please verify your search query or clear the filter to view all modules.</p>
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="mt-6 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold transition-all shadow-md shadow-blue-200 hover:scale-105 active:scale-95"
+                >
+                  Clear Search
+                </button>
+              </div>
+            )}
           </div>
         ) : activeView === CalculatorId.CARBON_NO ? (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
@@ -838,6 +1186,91 @@ const App: React.FC = () => {
               <ResultCard label="Exit Temperature" value={`${aetInputs.exitTemperature} °C`} subValue={`${(parseFloat(aetInputs.exitTemperature) + 273.15).toFixed(2)} K`} icon={<Wind className="w-5 h-5 text-blue-500" />} color="blue" />
             </div>
           </div>
+        ) : activeView === CalculatorId.CORRECTED_FLOW ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-50">
+                <Scaling className="w-5 h-5 text-indigo-600" />
+                <h3 className="text-lg font-bold text-slate-800">Corrected Flow Input Sheet</h3>
+              </div>
+
+              <div className="space-y-8">
+                <div>
+                  <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-blue-500 rounded-full"></span> Operating Parameters
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                    <InputGroup label="Operating Temp (°C)" name="opTemp" value={cfInputs.opTemp} onChange={handleCfInputChange} />
+                    <InputGroup label="Operating Pressure (kg/cm²g)" name="opPressure" value={cfInputs.opPressure} onChange={handleCfInputChange} />
+                    <InputGroup label="Measured Flow (NMC/hr)" name="measuredFlow" value={cfInputs.measuredFlow} onChange={handleCfInputChange} />
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full"></span> Process Gas Composition (mole %)
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-6 items-end">
+                    <InputGroup label="H₂ %" name="h2" value={cfInputs.h2} onChange={handleCfInputChange} />
+                    <InputGroup label="Ar %" name="ar" value={cfInputs.ar} onChange={handleCfInputChange} />
+                    <InputGroup label="N₂ %" name="n2" value={cfInputs.n2} onChange={handleCfInputChange} />
+                    <InputGroup label="CH₄ %" name="ch4" value={cfInputs.ch4} onChange={handleCfInputChange} />
+                    <InputGroup label="CO %" name="co" value={cfInputs.co} onChange={handleCfInputChange} />
+                    <InputGroup label="CO₂ %" name="co2" value={cfInputs.co2} onChange={handleCfInputChange} />
+                    <InputGroup label="C₂H₆ %" name="c2h6" value={cfInputs.c2h6} onChange={handleCfInputChange} />
+                    <InputGroup label="H₂O %" name="h2o" value={cfInputs.h2o} onChange={handleCfInputChange} />
+                    <InputGroup label="NH₃ %" name="nh3" value={cfInputs.nh3} onChange={handleCfInputChange} />
+                  </div>
+                  <CompositionTotal 
+                    values={[cfInputs.h2, cfInputs.ar, cfInputs.n2, cfInputs.ch4, cfInputs.co, cfInputs.co2, cfInputs.c2h6, cfInputs.h2o, cfInputs.nh3]} 
+                  />
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                    <span className="w-2 h-2 bg-purple-500 rounded-full"></span> Design Parameters
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+                    <InputGroup label="Design Temp (°C)" name="designTemp" value={cfInputs.designTemp} onChange={handleCfInputChange} />
+                    <InputGroup label="Design Pressure (kg/cm²g)" name="designPressure" value={cfInputs.designPressure} onChange={handleCfInputChange} />
+                    <InputGroup label="Design Gas MW (kg/kgmol)" name="designMW" value={cfInputs.designMW} onChange={handleCfInputChange} />
+                    <InputGroup label="Design Compressibility (Z)" name="designZ" value={cfInputs.designZ} onChange={handleCfInputChange} />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <ResultCard 
+                label="Process Gas MW" 
+                value={`${correctedFlowResult.mwProcess.toFixed(4)}`} 
+                subValue="kg/kgmol"
+                icon={<BarChart3 className="w-5 h-5 text-blue-500" />}
+                color="blue"
+              />
+              <ResultCard 
+                label="Compressibility Factor (Z)" 
+                value={`${correctedFlowResult.zProc.toFixed(4)}`} 
+                subValue="Operating Z Factor"
+                icon={<Activity className="w-5 h-5 text-emerald-500" />}
+                color="emerald"
+              />
+              <ResultCard 
+                label="Corrected Flow" 
+                value={`${correctedFlowResult.correctedFlow.toFixed(2)} NMC/hr`} 
+                subValue="Process Gas Flow"
+                icon={<Scaling className="w-5 h-5 text-indigo-500" />}
+                color="purple"
+              />
+              <ResultCard 
+                label="Change in Flow" 
+                value={`${correctedFlowResult.changeInFlow > 0 ? '+' : ''}${correctedFlowResult.changeInFlow.toFixed(2)} %`} 
+                subValue="Flow Variation %"
+                icon={<TrendingUp className="w-5 h-5 text-orange-500" />}
+                color="orange"
+              />
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-20 bg-white rounded-3xl border border-dashed border-slate-300">
              <div className="p-4 bg-slate-50 rounded-full mb-4">
@@ -849,10 +1282,10 @@ const App: React.FC = () => {
         )}
       </div>
 
-      <footer className="w-full bg-slate-100 border-t border-slate-200 py-10">
+      <footer className="w-full bg-slate-100 border-t border-slate-200 py-4">
         <div className="max-w-7xl mx-auto px-8 text-center flex flex-col items-center gap-1">
-          <p className="text-slate-700 font-bold text-sm">Developed by Muhammad Ans, Process Control Engineer.</p>
-          <p className="text-slate-400 text-[9px] uppercase tracking-[0.2em]">© 2026 | All rights reserved.</p>
+          <p className="text-slate-700 font-bold text-xs">Developed by Muhammad Ans, Process Control Engineer.</p>
+          <p className="text-slate-400 text-[8px] uppercase tracking-[0.2em]">© 2026 | All rights reserved.</p>
         </div>
       </footer>
     </div>
@@ -882,13 +1315,13 @@ const CompositionTotal: React.FC<{ values: string[], label?: string }> = ({ valu
   );
 };
 
-const InputGroup: React.FC<{ label: string, name: string, value: string, onChange: (e: any) => void }> = ({ label, name, value, onChange }) => (
+const InputGroup: React.FC<{ label: string, name: string, value: string, onChange: (e: any) => void, type?: string }> = ({ label, name, value, onChange, type = "number" }) => (
   <div className="flex flex-col gap-2 min-w-0">
     <label className="block text-[11.5px] font-bold text-slate-500 uppercase tracking-widest leading-none px-1 h-auto min-h-[1.5rem] whitespace-nowrap overflow-visible text-ellipsis overflow-hidden">
       {label}
     </label>
     <input
-      type="number"
+      type={type}
       name={name}
       value={value}
       onChange={onChange}

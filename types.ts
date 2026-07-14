@@ -8,7 +8,8 @@ export enum CalculatorId {
   HYDROGEN_TO_AIR = 'hydrogen-to-air',
   ATE = 'ate',
   PRODUCTION_LOSS = 'production-loss',
-  LHV = 'lhv'
+  LHV = 'lhv',
+  CORRECTED_FLOW = 'corrected-flow'
 }
 
 export enum EquipmentType {
@@ -60,6 +61,25 @@ export interface LhvInput {
   h2: string;
   co: string;
   nh3: string;
+}
+
+export interface CorrectedFlowInput {
+  opTemp: string;
+  opPressure: string;
+  measuredFlow: string;
+  h2: string;
+  ar: string;
+  n2: string;
+  ch4: string;
+  co: string;
+  co2: string;
+  c2h6: string;
+  h2o: string;
+  nh3: string;
+  designTemp: string;
+  designPressure: string;
+  designMW: string;
+  designZ: string;
 }
 
 export interface SteamToCarbonInput {
