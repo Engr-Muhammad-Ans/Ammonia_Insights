@@ -9,7 +9,10 @@ export enum CalculatorId {
   ATE = 'ate',
   PRODUCTION_LOSS = 'production-loss',
   LHV = 'lhv',
-  CORRECTED_FLOW = 'corrected-flow'
+  CORRECTED_FLOW = 'corrected-flow',
+  HEAT_CAPACITY = 'heat-capacity',
+  HEAT_OF_FORMATION = 'heat-of-formation',
+  KNOCK_OUT_DRUM = 'knock-out-drum'
 }
 
 export enum EquipmentType {
@@ -161,4 +164,28 @@ export interface CalculationResult {
     nh3: number;
   };
   results: SingleApproachResult[];
+}
+
+export interface HeatCapacityInput {
+  tempC: string;
+  selectedGas: string;
+}
+
+export interface HeatOfFormationInput {
+  tempC: string;
+  selectedGas: string;
+}
+
+export interface KnockOutDrumInput {
+  tempC: string;
+  pressureKgCm2: string;
+  totalFlowNMC: string;
+  h2: string;
+  n2: string;
+  co2: string;
+  co: string;
+  ar: string;
+  ch4: string;
+  h2o: string;
+  c2h6: string;
 }

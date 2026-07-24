@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { EquipmentType, CalculationInput, CalculatorId, CarbonNoInput, HydrogenNoInput, LhvInput, CorrectedFlowInput, SteamToCarbonInput, FrontEndLoadInput, GasToAirInput, HydrogenToAirInput, ProductionLossInputs, BackendLoadInput } from './types';
+import { EquipmentType, CalculationInput, CalculatorId, CarbonNoInput, HydrogenNoInput, LhvInput, CorrectedFlowInput, SteamToCarbonInput, FrontEndLoadInput, GasToAirInput, HydrogenToAirInput, ProductionLossInputs, BackendLoadInput, HeatCapacityInput, HeatOfFormationInput, KnockOutDrumInput } from './types';
 import { calculateApproach } from './services/calculator';
+import { GAS_CP_CONSTANTS, GAS_HOF_CONSTANTS, KOD_GAS_COMPONENTS } from './constants';
 import { 
   FlaskConical, 
   Settings2, 
@@ -126,22 +127,22 @@ const App: React.FC = () => {
 
   // Corrected Flow State
   const [cfInputs, setCfInputs] = useState<CorrectedFlowInput>({
-    opTemp: '35',
-    opPressure: '32.9',
-    measuredFlow: '50000',
-    h2: '63.57',
-    ar: '0.80',
-    n2: '6.56',
-    ch4: '7.50',
-    co: '9.09',
-    co2: '12.48',
-    c2h6: '0',
+    opTemp: '385',
+    opPressure: '44',
+    measuredFlow: '50295',
+    h2: '0.97',
+    ar: '0.01',
+    n2: '17.73',
+    ch4: '69.07',
+    co: '0.11',
+    co2: '11.87',
+    c2h6: '0.24',
     h2o: '0',
     nh3: '0',
-    designTemp: '30',
-    designPressure: '35.0',
-    designMW: '10.5',
-    designZ: '0.99'
+    designTemp: '385',
+    designPressure: '39.0',
+    designMW: '20.19',
+    designZ: '1.01'
   });
 
   // Steam to Carbon State
@@ -192,12 +193,216 @@ const App: React.FC = () => {
 
   // Production Loss State
   const [plInputs, setPlInputs] = useState<ProductionLossInputs>({
-    ch4Slip: { gasFlow: '100000', initialSlip: '0.25', finalSlip: '0.35' },
-    coSlip: { gasFlow: '85000', initialSlip: '0.30', finalSlip: '0.50' },
-    co2Slip: { gasFlow: '80000', initialSlip: '0.10', finalSlip: '0.20' }
+    ch4Slip: { gasFlow: '181797', initialSlip: '0.25', finalSlip: '0.35' },
+    coSlip: { gasFlow: '202608', initialSlip: '0.30', finalSlip: '0.50' },
+    co2Slip: { gasFlow: '162519', initialSlip: '0.10', finalSlip: '0.20' }
+  });
+
+  // Heat Capacity State
+  const [hcInputs, setHcInputs] = useState<HeatCapacityInput>({
+    tempC: '25',
+    selectedGas: 'CH4'
+  });
+
+  // Heat of Formation State
+  const [hofInputs, setHofInputs] = useState<HeatOfFormationInput>({
+    tempC: '25',
+    selectedGas: 'CH4'
+  });
+
+  // Knock Out Drum State
+  const [kodInputs, setKodInputs] = useState<KnockOutDrumInput>({
+    tempC: '165',
+    pressureKgCm2: '30.3',
+    totalFlowNMC: '304390',
+    h2: '39.094',
+    n2: '12.944',
+    co2: '13.095',
+    co: '0.099',
+    ar: '0.131',
+    ch4: '0.342',
+    h2o: '34.295',
+    c2h6: '0.00'
   });
 
   const aetResults = useMemo(() => calculateApproach({ ...aetInputs, equipment: selectedEquipment }), [aetInputs, selectedEquipment]);
+
+  const heatCapacityResult = useMemo(() => {
+    const tC = parseFloat(hcInputs.tempC) || 0;
+    const tK = tC + 273.15;
+    const gas = GAS_CP_CONSTANTS[hcInputs.selectedGas] || GAS_CP_CONSTANTS['CH4'];
+    
+    // Cp = A + B*T + C*T^2 + D*T^3 + E*T^4
+    const cpJmolK = gas.A + (gas.B * tK) + (gas.C * Math.pow(tK, 2)) + (gas.D * Math.pow(tK, 3)) + (gas.E * Math.pow(tK, 4));
+    const cpKJmolK = cpJmolK / 1000;
+    const cpCalmolK = cpJmolK / 4.184;
+
+    return {
+      tC,
+      tK,
+      gas,
+      cpJmolK,
+      cpKJmolK,
+      cpCalmolK
+    };
+  }, [hcInputs]);
+
+  const heatOfFormationResult = useMemo(() => {
+    const tC = parseFloat(hofInputs.tempC) || 0;
+    const tK = tC + 273.15;
+    const gasHof = GAS_HOF_CONSTANTS[hofInputs.selectedGas] || GAS_HOF_CONSTANTS['CH4'];
+    const gasCp = GAS_CP_CONSTANTS[hofInputs.selectedGas] || GAS_CP_CONSTANTS['CH4'];
+
+    // 1. Standard Heat of Formation at 298 K (kJ/mol)
+    let stdHofKJ = 0;
+    if (gasHof.isFormulaBased && gasHof.A !== undefined) {
+      const tStd = 298; // 298 K
+      stdHofKJ = gasHof.A + (gasHof.B! * tStd) + (gasHof.C! * Math.pow(tStd, 2));
+    } else {
+      stdHofKJ = gasHof.fixedStdHofKJ ?? 0;
+    }
+    const stdHofKcal = stdHofKJ / 4.184;
+
+    // 2. Heat capacity Cp at temperature T (in kJ/mol.K)
+    const cpJmolK = gasCp.A + (gasCp.B * tK) + (gasCp.C * Math.pow(tK, 2)) + (gasCp.D * Math.pow(tK, 3)) + (gasCp.E * Math.pow(tK, 4));
+    const cpKJmolK = cpJmolK / 1000;
+
+    // 3. Heat of Formation at Temperature T (kJ/mol)
+    // Heat of Formation at T (kJ/mol) = Std Hf (kJ/mol) + Cp(T in kJ/mol.K) * (T in K - 298 K)
+    const hofAtTKJ = stdHofKJ + (cpKJmolK * (tK - 298));
+    const hofAtTKcal = hofAtTKJ / 4.184;
+
+    return {
+      tC,
+      tK,
+      gasHof,
+      gasCp,
+      stdHofKJ,
+      stdHofKcal,
+      cpKJmolK,
+      hofAtTKJ,
+      hofAtTKcal
+    };
+  }, [hofInputs]);
+
+  const knockOutDrumResult = useMemo(() => {
+    const tC = parseFloat(kodInputs.tempC) || 0;
+    const tK = tC + 273.15;
+    const pTop = parseFloat(kodInputs.pressureKgCm2) || 1e-6;
+    const totalFlowNMC = parseFloat(kodInputs.totalFlowNMC) || 0;
+
+    // Saturation Pressure of Water (P_sat in kg/cm2)
+    // P_sat = EXP(175.766 - (11552 / T_K) - (22.679 * LN(T_K))) * 0.00001019716213
+    const pSat = Math.exp(175.766 - (11552 / tK) - (22.679 * Math.log(tK))) * 0.00001019716213;
+
+    // Water Vapor Mole Fraction at Top (y_H2O)
+    const yH2O = Math.min(1, Math.max(0, pSat / pTop));
+    const yDry = 1 - yH2O;
+
+    // Component percentages
+    const inletPcts: Record<string, number> = {
+      h2: parseFloat(kodInputs.h2) || 0,
+      n2: parseFloat(kodInputs.n2) || 0,
+      co2: parseFloat(kodInputs.co2) || 0,
+      co: parseFloat(kodInputs.co) || 0,
+      ar: parseFloat(kodInputs.ar) || 0,
+      ch4: parseFloat(kodInputs.ch4) || 0,
+      h2o: parseFloat(kodInputs.h2o) || 0,
+      c2h6: parseFloat(kodInputs.c2h6) || 0,
+    };
+
+    const totalPctEntered = Object.values(inletPcts).reduce((a, b) => a + b, 0);
+
+    // Calculate individual component NMC/hr from total flow * (percentage / 100)
+    const inletFlowsNMC: Record<string, number> = {};
+    KOD_GAS_COMPONENTS.forEach(comp => {
+      const pct = inletPcts[comp.id] || 0;
+      inletFlowsNMC[comp.id] = totalFlowNMC * (pct / 100);
+    });
+
+    let fDryTopNMC = 0;
+    KOD_GAS_COMPONENTS.forEach(comp => {
+      if (comp.id !== 'h2o') {
+        fDryTopNMC += inletFlowsNMC[comp.id] || 0;
+      }
+    });
+
+    const fH2OInletNMC = inletFlowsNMC['h2o'] || 0;
+    const fInletTotalNMC = fDryTopNMC + fH2OInletNMC;
+
+    let fTopTotalNMC = yDry > 0 ? fDryTopNMC / yDry : fDryTopNMC;
+    let fH2OTopNMC = yH2O * fTopTotalNMC;
+    let fH2OBottomNMC = fH2OInletNMC - fH2OTopNMC;
+
+    if (fH2OBottomNMC < 0) {
+      fH2OBottomNMC = 0;
+      fH2OTopNMC = fH2OInletNMC;
+      fTopTotalNMC = fDryTopNMC + fH2OInletNMC;
+    }
+
+    const waterRemovalPct = fH2OInletNMC > 0 ? (fH2OBottomNMC / fH2OInletNMC) * 100 : 0;
+
+    // Stream Summaries
+    let inletTotalKgmol = 0;
+    let inletTotalKg = 0;
+    const inletRows = KOD_GAS_COMPONENTS.map(comp => {
+      const nmc = inletFlowsNMC[comp.id] || 0;
+      const kgmol = nmc / 22.414;
+      const kg = kgmol * comp.mw;
+      inletTotalKgmol += kgmol;
+      inletTotalKg += kg;
+      return { comp, pct: inletPcts[comp.id] || 0, nmc, kgmol, kg, molePct: 0, massPct: 0 };
+    });
+
+    inletRows.forEach(row => {
+      row.molePct = fInletTotalNMC > 0 ? (row.nmc / fInletTotalNMC) * 100 : 0;
+      row.massPct = inletTotalKg > 0 ? (row.kg / inletTotalKg) * 100 : 0;
+    });
+
+    let topTotalKgmol = 0;
+    let topTotalKg = 0;
+    const topRows = KOD_GAS_COMPONENTS.map(comp => {
+      const nmc = comp.id === 'h2o' ? fH2OTopNMC : (inletFlowsNMC[comp.id] || 0);
+      const kgmol = nmc / 22.414;
+      const kg = kgmol * comp.mw;
+      topTotalKgmol += kgmol;
+      topTotalKg += kg;
+      return { comp, nmc, kgmol, kg, molePct: 0, massPct: 0 };
+    });
+
+    topRows.forEach(row => {
+      row.molePct = fTopTotalNMC > 0 ? (row.nmc / fTopTotalNMC) * 100 : 0;
+      row.massPct = topTotalKg > 0 ? (row.kg / topTotalKg) * 100 : 0;
+    });
+
+    const bottomKgmol = fH2OBottomNMC / 22.414;
+    const bottomKg = bottomKgmol * 18.015;
+
+    return {
+      tC,
+      tK,
+      pTop,
+      totalFlowNMC,
+      totalPctEntered,
+      pSat,
+      yH2O,
+      yDry,
+      waterRemovalPct,
+      fInletTotalNMC,
+      inletTotalKgmol,
+      inletTotalKg,
+      inletRows,
+      fTopTotalNMC,
+      topTotalKgmol,
+      topTotalKg,
+      topRows,
+      fH2OInletNMC,
+      fH2OTopNMC,
+      fH2OBottomNMC,
+      bottomKgmol,
+      bottomKg
+    };
+  }, [kodInputs]);
 
   const carbonNoResult = useMemo(() => {
     const ch4 = parseFloat(carbonInputs.ch4) || 0;
@@ -562,6 +767,33 @@ const App: React.FC = () => {
       disabled: false,
       description: 'Orifice gas flow rate correction for temperature and pressure density shift.',
       tags: ['orifice', 'flow correction', 'density', 'compensation', 'pressure', 'temperature']
+    },
+    { 
+      id: CalculatorId.HEAT_CAPACITY, 
+      name: 'Heat Capacity (Cp)', 
+      icon: <Thermometer className="w-6 h-6" />, 
+      color: 'amber', 
+      disabled: false,
+      description: 'Specific heat capacity (Cp) polynomial calculation for gas components at any temperature.',
+      tags: ['heat capacity', 'cp', 'thermodynamics', 'gas', 'temperature', 'ch4', 'co2', 'co', 'n2', 'h2', 'c2h6', 'h2o', 'o2', 'h2s', 'nh3', 'enthalpy', 'specific heat']
+    },
+    { 
+      id: CalculatorId.HEAT_OF_FORMATION, 
+      name: 'Heat of Formation (ΔHf)', 
+      icon: <Flame className="w-6 h-6" />, 
+      color: 'orange', 
+      disabled: false,
+      description: 'Standard and temperature-dependent heat of formation (ΔHf) calculation in kJ/mol & kcal/mol.',
+      tags: ['heat of formation', 'enthalpy', 'delta hf', 'standard enthalpy', 'thermodynamics', '298k', 'gas', 'ch4', 'co2', 'co', 'n2', 'h2', 'c2h6', 'h2o', 'o2', 'h2s', 'nh3', 'formation heat']
+    },
+    { 
+      id: CalculatorId.KNOCK_OUT_DRUM, 
+      name: 'Knock Out Drum Vessel', 
+      icon: <Droplets className="w-6 h-6" />, 
+      color: 'cyan', 
+      disabled: false,
+      description: 'Gas & liquid separation across vessel with water knockout calculations.',
+      tags: ['knock out drum', 'vessel', 'water knockout', 'saturation pressure', 'gas liquid separation', 'h2o', 'separator', 'dew point']
     },
     { 
       id: 'reformer-kinetic-model', 
@@ -1270,6 +1502,534 @@ const App: React.FC = () => {
                 color="orange"
               />
             </div>
+          </div>
+        ) : activeView === CalculatorId.HEAT_CAPACITY ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-100">
+                <Thermometer className="w-5 h-5 text-amber-600" />
+                <h3 className="text-lg font-bold text-slate-800">Gas Heat Capacity (Cp) Input Sheet</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
+                <div>
+                  <label className="block text-[11.5px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-2">
+                    Select Gas Component
+                  </label>
+                  <select
+                    value={hcInputs.selectedGas}
+                    onChange={(e) => setHcInputs(prev => ({ ...prev, selectedGas: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none cursor-pointer"
+                  >
+                    {Object.entries(GAS_CP_CONSTANTS).map(([key, val]) => (
+                      <option key={key} value={key}>{val.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <InputGroup 
+                  label="Temperature (°C)" 
+                  name="tempC" 
+                  value={hcInputs.tempC} 
+                  onChange={(e) => setHcInputs(prev => ({ ...prev, tempC: e.target.value }))} 
+                />
+              </div>
+            </section>
+
+            {/* Calculated Cp Cards in 3 Units */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <ResultCard 
+                label="Cₚ in J / (mol·K)" 
+                value={`${heatCapacityResult.cpJmolK.toFixed(4)}`} 
+                subValue="Joules per mol kelvin"
+                icon={<Zap className="w-5 h-5 text-blue-500" />}
+                color="blue"
+              />
+              <ResultCard 
+                label="Cₚ in kJ / (mol·K)" 
+                value={`${heatCapacityResult.cpKJmolK.toFixed(6)}`} 
+                subValue="Kilojoules per mol kelvin"
+                icon={<Scaling className="w-5 h-5 text-purple-500" />}
+                color="purple"
+              />
+              <ResultCard 
+                label="Cₚ in cal / (mol·K)" 
+                value={`${heatCapacityResult.cpCalmolK.toFixed(4)}`} 
+                subValue="Calories per mol kelvin"
+                icon={<Flame className="w-5 h-5 text-emerald-500" />}
+                color="emerald"
+              />
+            </div>
+
+            {/* Empirical Constants Table */}
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-amber-600" />
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Empirical Constants for {heatCapacityResult.gas.name}
+                  </h3>
+                </div>
+                <span className="text-xs font-black bg-amber-100 text-amber-800 px-3 py-1 rounded-full border border-amber-200">
+                  {heatCapacityResult.gas.formula}
+                </span>
+              </div>
+              <div className="p-6 grid grid-cols-2 sm:grid-cols-5 gap-4">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Constant A</span>
+                  <span className="font-mono text-sm font-bold text-slate-800">{heatCapacityResult.gas.A}</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Constant B</span>
+                  <span className="font-mono text-sm font-bold text-slate-800">{heatCapacityResult.gas.B}</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Constant C</span>
+                  <span className="font-mono text-sm font-bold text-slate-800">{heatCapacityResult.gas.C}</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Constant D</span>
+                  <span className="font-mono text-sm font-bold text-slate-800">{heatCapacityResult.gas.D.toExponential(4)}</span>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Constant E</span>
+                  <span className="font-mono text-sm font-bold text-slate-800">{heatCapacityResult.gas.E.toExponential(4)}</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        ) : activeView === CalculatorId.HEAT_OF_FORMATION ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-100">
+                <Flame className="w-5 h-5 text-orange-600" />
+                <h3 className="text-lg font-bold text-slate-800">Heat of Formation (ΔHf) Input Sheet</h3>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
+                <div>
+                  <label className="block text-[11.5px] font-bold text-slate-500 uppercase tracking-widest leading-none mb-2">
+                    Select Gas Component
+                  </label>
+                  <select
+                    value={hofInputs.selectedGas}
+                    onChange={(e) => setHofInputs(prev => ({ ...prev, selectedGas: e.target.value }))}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none cursor-pointer"
+                  >
+                    {Object.entries(GAS_HOF_CONSTANTS).map(([key, val]) => (
+                      <option key={key} value={key}>{val.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <InputGroup 
+                  label="Temperature (°C)" 
+                  name="tempC" 
+                  value={hofInputs.tempC} 
+                  onChange={(e) => setHofInputs(prev => ({ ...prev, tempC: e.target.value }))} 
+                />
+              </div>
+            </section>
+
+            {/* Standard Heat of Formation at 298 K */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-blue-500" /> Standard Heat of Formation at 298 K (25 °C)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ResultCard 
+                  label="Standard ΔHf (298 K)" 
+                  value={`${heatOfFormationResult.stdHofKJ.toFixed(2)} kJ/mol`} 
+                  subValue="Kilojoules per mol"
+                  icon={<Zap className="w-5 h-5 text-blue-500" />}
+                  color="blue"
+                />
+                <ResultCard 
+                  label="Standard ΔHf (298 K)" 
+                  value={`${heatOfFormationResult.stdHofKcal.toFixed(2)} kcal/mol`} 
+                  subValue="Kilocalories per mol"
+                  icon={<Flame className="w-5 h-5 text-orange-500" />}
+                  color="orange"
+                />
+              </div>
+            </div>
+
+            {/* Heat of Formation at Temperature T */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Thermometer className="w-4 h-4 text-emerald-500" /> Heat of Formation at T = {heatOfFormationResult.tC} °C ({heatOfFormationResult.tK.toFixed(2)} K)
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <ResultCard 
+                  label={`ΔHf at ${heatOfFormationResult.tC} °C`} 
+                  value={`${heatOfFormationResult.hofAtTKJ.toFixed(2)} kJ/mol`} 
+                  subValue="Kilojoules per mol"
+                  icon={<Scaling className="w-5 h-5 text-emerald-500" />}
+                  color="emerald"
+                />
+                <ResultCard 
+                  label={`ΔHf at ${heatOfFormationResult.tC} °C`} 
+                  value={`${heatOfFormationResult.hofAtTKcal.toFixed(2)} kcal/mol`} 
+                  subValue="Kilocalories per mol"
+                  icon={<Activity className="w-5 h-5 text-purple-500" />}
+                  color="purple"
+                />
+              </div>
+            </div>
+
+            {/* Regression Coefficients & Formula Details */}
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-orange-600" />
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Regression Coefficients & Formula ({heatOfFormationResult.gasHof.name})
+                  </h3>
+                </div>
+                <span className="text-xs font-black bg-orange-100 text-orange-800 px-3 py-1 rounded-full border border-orange-200">
+                  {heatOfFormationResult.gasHof.formula}
+                </span>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-4 text-xs text-amber-900 space-y-1 font-medium">
+                  <p><strong>Standard Formula at 298 K:</strong> ΔHf = A + B·T + C·T² (evaluated at T = 298 K)</p>
+                  <p><strong>Formula at Temperature T:</strong> ΔHf(T) = ΔHf(298K) + C<sub>p</sub>(T) × (T - 298K)</p>
+                  <p className="pt-1 text-slate-600">
+                    Evaluated C<sub>p</sub> at {heatOfFormationResult.tC} °C: <span className="font-mono font-bold text-slate-800">{heatOfFormationResult.cpKJmolK.toFixed(6)} kJ/(mol·K)</span>
+                  </p>
+                </div>
+
+                {heatOfFormationResult.gasHof.isFormulaBased ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Coefficient A</span>
+                      <span className="font-mono text-sm font-bold text-slate-800">{heatOfFormationResult.gasHof.A}</span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Coefficient B</span>
+                      <span className="font-mono text-sm font-bold text-slate-800">{heatOfFormationResult.gasHof.B}</span>
+                    </div>
+                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Coefficient C</span>
+                      <span className="font-mono text-sm font-bold text-slate-800">{heatOfFormationResult.gasHof.C?.toExponential(4)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-600">Predefined Standard ΔHf at 298 K</span>
+                    <span className="font-mono text-sm font-black text-slate-800">{heatOfFormationResult.gasHof.fixedStdHofKJ} kJ/mol</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        ) : activeView === CalculatorId.KNOCK_OUT_DRUM ? (
+          <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
+            {/* Input Sheet */}
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-6">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <Droplets className="w-5 h-5 text-cyan-600" />
+                  <h3 className="text-lg font-bold text-slate-800">Knock Out Drum Input Parameters</h3>
+                </div>
+                <span className="text-xs font-semibold bg-cyan-50 text-cyan-700 border border-cyan-200 px-3 py-1 rounded-full flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse"></span>
+                  Vessel Gas-Liquid Separator
+                </span>
+              </div>
+
+              {/* Operating Conditions Inputs */}
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-1.5">
+                  <Gauge className="w-4 h-4 text-cyan-600" /> Operating Conditions & Total Flow
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <InputGroup 
+                    label="Vessel Top Temperature (°C)" 
+                    name="tempC" 
+                    value={kodInputs.tempC} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, tempC: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="Vessel Top Pressure (kg/cm²)" 
+                    name="pressureKgCm2" 
+                    value={kodInputs.pressureKgCm2} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, pressureKgCm2: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="Total Gas Flow Rate (NMC/hr)" 
+                    name="totalFlowNMC" 
+                    value={kodInputs.totalFlowNMC} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, totalFlowNMC: e.target.value }))} 
+                  />
+                </div>
+              </div>
+
+              {/* Gas Inlet Component Fractions / Percentages */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    <FlaskConical className="w-4 h-4 text-cyan-600" /> Gas Inlet Composition (%)
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-lg">
+                      Total Composition: <span className={`font-mono ${Math.abs(knockOutDrumResult.totalPctEntered - 100) < 0.1 ? 'text-emerald-700' : 'text-amber-700'}`}>{knockOutDrumResult.totalPctEntered.toFixed(2)} %</span>
+                    </span>
+                    <span className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-lg">
+                      Total Flow: <span className="font-mono text-cyan-700">{knockOutDrumResult.fInletTotalNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })} NMC/hr</span>
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <InputGroup 
+                    label="H₂ (%)" 
+                    name="h2" 
+                    value={kodInputs.h2} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, h2: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="N₂ (%)" 
+                    name="n2" 
+                    value={kodInputs.n2} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, n2: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="CO₂ (%)" 
+                    name="co2" 
+                    value={kodInputs.co2} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, co2: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="CO (%)" 
+                    name="co" 
+                    value={kodInputs.co} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, co: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="Ar (%)" 
+                    name="ar" 
+                    value={kodInputs.ar} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, ar: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="CH₄ (%)" 
+                    name="ch4" 
+                    value={kodInputs.ch4} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, ch4: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="H₂O (%)" 
+                    name="h2o" 
+                    value={kodInputs.h2o} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, h2o: e.target.value }))} 
+                  />
+                  <InputGroup 
+                    label="C₂H₆ (%)" 
+                    name="c2h6" 
+                    value={kodInputs.c2h6} 
+                    onChange={(e) => setKodInputs(prev => ({ ...prev, c2h6: e.target.value }))} 
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* Operating Conditions Cards */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-2">
+                <Activity className="w-4 h-4 text-cyan-600" /> Vessel Operating Conditions & Saturation Parameters
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <ResultCard 
+                  label="Vessel Top Temperature" 
+                  value={`${knockOutDrumResult.tC} °C`} 
+                  subValue={`${knockOutDrumResult.tK.toFixed(2)} K`}
+                  icon={<Thermometer className="w-5 h-5 text-amber-500" />}
+                  color="amber"
+                />
+                <ResultCard 
+                  label="Vessel Top Pressure" 
+                  value={`${knockOutDrumResult.pTop} kg/cm²`} 
+                  subValue="Absolute Vessel Pressure"
+                  icon={<Gauge className="w-5 h-5 text-blue-500" />}
+                  color="blue"
+                />
+                <ResultCard 
+                  label="H₂O Saturation Pressure (Psat)" 
+                  value={`${knockOutDrumResult.pSat.toFixed(4)} kg/cm²`} 
+                  subValue="At Top Temperature T_K"
+                  icon={<Zap className="w-5 h-5 text-purple-500" />}
+                  color="purple"
+                />
+                <ResultCard 
+                  label="H₂O Vapor Mole Fraction (y_H2O)" 
+                  value={(knockOutDrumResult.yH2O * 100).toFixed(3) + ' %'} 
+                  subValue={`Mole fraction: ${knockOutDrumResult.yH2O.toFixed(6)}`}
+                  icon={<Droplets className="w-5 h-5 text-cyan-500" />}
+                  color="cyan"
+                />
+              </div>
+            </div>
+
+            {/* Vessel Inlet Stream Summary */}
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Wind className="w-5 h-5 text-slate-700" />
+                  <h3 className="text-lg font-bold text-slate-800">Vessel Inlet Stream Summary</h3>
+                </div>
+                <span className="text-xs font-mono font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
+                  Total: {knockOutDrumResult.fInletTotalNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })} NMC/hr | {knockOutDrumResult.inletTotalKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg/hr
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                      <th className="py-3.5 px-6">Component</th>
+                      <th className="py-3.5 px-4 text-center">Formula</th>
+                      <th className="py-3.5 px-4 text-right">MW (g/mol)</th>
+                      <th className="py-3.5 px-4 text-right">Input %</th>
+                      <th className="py-3.5 px-4 text-right">Calculated Flow (NMC/hr)</th>
+                      <th className="py-3.5 px-4 text-right">Mole %</th>
+                      <th className="py-3.5 px-4 text-right">Flow (kgmol/hr)</th>
+                      <th className="py-3.5 px-4 text-right">Flow (kg/hr)</th>
+                      <th className="py-3.5 px-6 text-right">Mass %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {knockOutDrumResult.inletRows.map((row) => (
+                      <tr key={row.comp.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-6 font-bold text-slate-800">{row.comp.name}</td>
+                        <td className="py-3 px-4 text-center font-mono font-semibold text-slate-600">{row.comp.formula}</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-600">{row.comp.mw.toFixed(3)}</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-700">{row.pct.toFixed(2)} %</td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">{row.nmc.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        <td className="py-3 px-4 text-right font-mono text-cyan-700 font-bold">{row.molePct.toFixed(2)} %</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-700">{row.kgmol.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-700">{row.kg.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        <td className="py-3 px-6 text-right font-mono text-emerald-700 font-bold">{row.massPct.toFixed(2)} %</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100/80 font-black text-slate-900 border-t-2 border-slate-200">
+                      <td colSpan={3} className="py-3.5 px-6 uppercase text-xs tracking-wider">Total Inlet Stream</td>
+                      <td className="py-3.5 px-4 text-right font-mono text-slate-900">{knockOutDrumResult.totalPctEntered.toFixed(2)} %</td>
+                      <td className="py-3.5 px-4 text-right font-mono">{knockOutDrumResult.fInletTotalNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                      <td className="py-3.5 px-4 text-right font-mono text-cyan-800">100.00 %</td>
+                      <td className="py-3.5 px-4 text-right font-mono">{knockOutDrumResult.inletTotalKgmol.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                      <td className="py-3.5 px-4 text-right font-mono">{knockOutDrumResult.inletTotalKg.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                      <td className="py-3.5 px-6 text-right font-mono text-emerald-800">100.00 %</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+
+            {/* Vessel Top Gas Stream Summary */}
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Scaling className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-lg font-bold text-slate-800">Vessel Top Gas Stream Summary</h3>
+                </div>
+                <span className="text-xs font-mono font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
+                  Total: {knockOutDrumResult.fTopTotalNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })} NMC/hr | {knockOutDrumResult.topTotalKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} kg/hr
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                      <th className="py-3.5 px-6">Component</th>
+                      <th className="py-3.5 px-4 text-center">Formula</th>
+                      <th className="py-3.5 px-4 text-right">MW (g/mol)</th>
+                      <th className="py-3.5 px-4 text-right">Flow (NMC/hr)</th>
+                      <th className="py-3.5 px-4 text-right">Mole %</th>
+                      <th className="py-3.5 px-4 text-right">Flow (kgmol/hr)</th>
+                      <th className="py-3.5 px-4 text-right">Flow (kg/hr)</th>
+                      <th className="py-3.5 px-6 text-right">Mass %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {knockOutDrumResult.topRows.map((row) => (
+                      <tr key={row.comp.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-6 font-bold text-slate-800">{row.comp.name}</td>
+                        <td className="py-3 px-4 text-center font-mono font-semibold text-slate-600">{row.comp.formula}</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-600">{row.comp.mw.toFixed(3)}</td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-800">{row.nmc.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        <td className="py-3 px-4 text-right font-mono text-blue-700 font-bold">{row.molePct.toFixed(2)} %</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-700">{row.kgmol.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-700">{row.kg.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                        <td className="py-3 px-6 text-right font-mono text-emerald-700 font-bold">{row.massPct.toFixed(2)} %</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100/80 font-black text-slate-900 border-t-2 border-slate-200">
+                      <td colSpan={3} className="py-3.5 px-6 uppercase text-xs tracking-wider">Total Top Gas Stream</td>
+                      <td className="py-3.5 px-4 text-right font-mono">{knockOutDrumResult.fTopTotalNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                      <td className="py-3.5 px-4 text-right font-mono text-blue-800">100.00 %</td>
+                      <td className="py-3.5 px-4 text-right font-mono">{knockOutDrumResult.topTotalKgmol.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                      <td className="py-3.5 px-4 text-right font-mono">{knockOutDrumResult.topTotalKg.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                      <td className="py-3.5 px-6 text-right font-mono text-emerald-800">100.00 %</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </section>
+
+            {/* Vessel Bottom Liquid Stream (Water Knockout) */}
+            <section className="bg-gradient-to-br from-cyan-900 to-slate-900 rounded-2xl shadow-md p-6 text-white overflow-hidden relative">
+              <div className="absolute right-0 top-0 translate-x-4 -translate-y-4 opacity-10 pointer-events-none">
+                <Droplets className="w-64 h-64 text-cyan-300" />
+              </div>
+
+              <div className="relative z-10 space-y-6">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-cyan-800/60">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 bg-cyan-500/20 rounded-xl border border-cyan-400/30 text-cyan-300">
+                      <ArrowDownCircle className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Vessel Bottom Liquid Stream (Water Knockout)</h3>
+                      <p className="text-xs text-cyan-200/80">Condensed liquid water removed from vessel bottom outlet</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-cyan-500/20 border border-cyan-400/40 rounded-xl px-4 py-2 text-right">
+                    <span className="text-[10px] uppercase font-black text-cyan-300 block tracking-wider">Water Removal Efficiency</span>
+                    <span className="text-2xl font-black font-mono text-cyan-300">{knockOutDrumResult.waterRemovalPct.toFixed(2)}%</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-cyan-200/70 block mb-1">Water Knockout Flow</span>
+                    <span className="text-xl font-mono font-bold text-white">{knockOutDrumResult.fH2OBottomNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                    <span className="text-xs text-cyan-300 ml-1 font-semibold">NMC/hr</span>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-cyan-200/70 block mb-1">Molar Flow Rate</span>
+                    <span className="text-xl font-mono font-bold text-white">{knockOutDrumResult.bottomKgmol.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                    <span className="text-xs text-cyan-300 ml-1 font-semibold">kgmol/hr</span>
+                  </div>
+
+                  <div className="bg-white/5 border border-white/10 rounded-xl p-4 backdrop-blur-sm">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-cyan-200/70 block mb-1">Mass Flow Rate</span>
+                    <span className="text-xl font-mono font-bold text-white">{knockOutDrumResult.bottomKg.toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>
+                    <span className="text-xs text-cyan-300 ml-1 font-semibold">kg/hr</span>
+                  </div>
+                </div>
+
+                <div className="bg-cyan-950/60 border border-cyan-800/80 rounded-xl p-4 text-xs text-cyan-200/90 flex items-start gap-2">
+                  <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Knockout Mass Balance Summary:</strong> Out of <span className="font-mono font-bold text-white">{knockOutDrumResult.fH2OInletNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })} NMC/hr</span> of entered water in the feed, <span className="font-mono font-bold text-cyan-300">{knockOutDrumResult.fH2OBottomNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })} NMC/hr ({knockOutDrumResult.waterRemovalPct.toFixed(2)}%)</span> is knocked out as liquid at the vessel bottom, and <span className="font-mono font-bold text-white">{knockOutDrumResult.fH2OTopNMC.toLocaleString('en-US', { maximumFractionDigits: 2 })} NMC/hr</span> remains in the top gas stream.
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center p-20 bg-white rounded-3xl border border-dashed border-slate-300">
