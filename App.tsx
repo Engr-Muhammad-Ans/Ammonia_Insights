@@ -881,7 +881,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black text-slate-800 tracking-tight leading-none mb-1">Ammonia Insights</h1>
-              <p className="text-slate-500 font-medium text-sm">Comprehensive Plant Process Monitoring</p>
+              <p className="text-slate-500 font-medium text-sm">Comprehensive Process Plant WorkBench</p>
             </div>
           </div>
           
